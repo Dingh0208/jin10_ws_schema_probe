@@ -1,57 +1,56 @@
-# Jin10 WebSocket Macro Filter
+# 金十 WebSocket 宏观新闻过滤与 QQ 推送工具
 
-## Project Structure
+这个项目用于连接金十 WebSocket 实时消息流，筛选对加密资产、宏观市场、地缘风险和系统性风险有影响的快讯，并把符合规则的消息写入推送队列，再由独立 QQ 推送进程发送到群聊。
 
-- `probe.py`: connects to Jin10 WebSocket, records raw messages, runs filtering, and appends push candidates to the queue.
-- `news_filter.py`: keyword lists, scoring rules, `score_news()`, `should_push()`, and text extraction.
-- `push_queue.py`: JSONL queue writer and offset-based incremental consumer.
-- `qq_pusher.py`: independent QQ group push worker.
-- `config.py`: paths and QQ HTTP API configuration.
-- `logs/raw_messages.log`: all raw Jin10 messages.
-- `logs/pushed_news.log`: messages the filter decided should be pushed.
-- `logs/skipped_news.log`: messages skipped by the filter, with reasons.
-- `logs/push_queue.jsonl`: pending QQ push queue.
-- `logs/push_queue.offset`: real QQ worker byte offset.
-- `logs/qq_sent.log`: QQ messages successfully sent.
-- `logs/qq_failed.log`: QQ send failures.
+## 项目结构
 
-## Data Flow
+- `probe.py`：连接金十 WebSocket，记录原始消息，执行过滤规则，并把待推送消息写入队列。
+- `news_filter.py`：关键词、评分规则、`score_news()`、`should_push()` 和文本提取逻辑。
+- `impact_analyzer.py`：判断新闻对 BTC、原油、黄金、美股等资产的影响方向。
+- `push_queue.py`：JSONL 推送队列写入器，以及基于 offset 的增量消费工具。
+- `qq_pusher.py`：独立 QQ 群推送进程。
+- `config.py`：路径、队列、日志和 QQ HTTP API 配置，敏感配置从 `.env` 读取。
+- `scripts/`：过滤规则回归测试、影响判断测试和历史消息回测脚本。
+- `deploy/`：systemd 服务模板。
+- `logs/`：运行日志目录，不提交到 GitHub。
 
-Jin10 WebSocket -> `probe.py` -> `news_filter.py` -> `logs/push_queue.jsonl` -> `qq_pusher.py` -> QQ group.
+## 数据流程
 
-`pushed_news.log` means the filter matched the message. It does not mean QQ delivery succeeded. QQ delivery status is recorded in `qq_sent.log` and `qq_failed.log`.
+金十 WebSocket -> `probe.py` -> `news_filter.py` -> `logs/push_queue.jsonl` -> `qq_pusher.py` -> QQ 群。
 
-## Run the News Receiver
+`pushed_news.log` 表示过滤器命中了消息，不代表 QQ 已发送成功。QQ 发送结果记录在 `qq_sent.log` 和 `qq_failed.log`。
 
-Copy `.env.example` to `.env`, configure `JIN10_WS_URL`, then run:
+## 运行新闻接收器
+
+复制 `.env.example` 为 `.env`，配置 `JIN10_WS_URL`，然后运行：
 
 ```bash
 python3 probe.py
 ```
 
-## Run the QQ Pusher
+## 运行 QQ 推送器
 
-Preview queued messages without sending QQ:
+只预览队列消息，不实际发送 QQ：
 
 ```bash
 python3 qq_pusher.py --dry-run --once
 ```
 
-Run continuously:
+持续运行：
 
 ```bash
 python3 qq_pusher.py --loop --interval 3
 ```
 
-Dry-run uses `logs/push_queue.dry_run.offset` by default so it does not advance the real `logs/push_queue.offset`. To test the real offset deliberately:
+dry-run 默认使用 `logs/push_queue.dry_run.offset`，不会推进真实的 `logs/push_queue.offset`。如需刻意测试真实 offset：
 
 ```bash
 python3 qq_pusher.py --dry-run --once --advance-offset
 ```
 
-## Enable Real QQ Push
+## 开启真实 QQ 推送
 
-Set the deployment values in `.env`:
+在 `.env` 中配置部署参数：
 
 ```bash
 QQ_PUSH_ENABLED=true
@@ -61,28 +60,28 @@ QQ_ACCESS_TOKEN=
 QQ_ACCESS_TOKEN_MODE=none
 ```
 
-Do not commit real access tokens, QQ group IDs, WebSocket URLs, or proxy credentials.
+不要提交真实 access token、QQ 群号、WebSocket URL、代理订阅或节点信息。
 
-## Modify News Filtering Rules
+## 修改新闻过滤规则
 
-Only edit `news_filter.py` when optimizing keywords, scoring, or skip rules. `probe.py` should remain focused on receiving messages and appending queue items. `qq_pusher.py` should not import or call the news filter.
+优化关键词、评分和跳过规则时，主要修改 `news_filter.py`。`probe.py` 应保持专注于接收消息和写入队列，`qq_pusher.py` 不应导入或调用新闻过滤逻辑。
 
-## Queue Offset Troubleshooting
+## 队列 Offset 排查
 
-`qq_pusher.py` reads `push_queue.jsonl` from the byte position stored in `push_queue.offset`. If the queue file is truncated or rotated and the offset is larger than the file size, the consumer resets the offset to `0`.
+`qq_pusher.py` 会从 `push_queue.offset` 记录的字节位置开始读取 `push_queue.jsonl`。如果队列文件被截断或轮转，且 offset 大于文件大小，消费者会自动把 offset 重置为 `0`。
 
-To replay from the beginning, stop `qq_pusher.py` and set:
+如需从头重放，停止 `qq_pusher.py` 后执行：
 
 ```bash
 printf '0\n' > logs/push_queue.offset
 ```
 
-Dry-run offset is separate:
+dry-run offset 是独立的：
 
 ```bash
 printf '0\n' > logs/push_queue.dry_run.offset
 ```
 
-## Network and Proxy Notes
+## 网络与代理注意事项
 
-The server already has a global proxy. Do not install or reconfigure proxy clients for this project. If dependency downloads fail, first inspect the command error output and basic network reachability. Do not write proxy subscription links, access tokens, or node information into code, logs, or this README.
+服务器已有全局代理。不要为本项目额外安装或重配代理客户端。如果依赖下载失败，先查看命令错误输出和基础网络连通性。不要把代理订阅链接、访问令牌或节点信息写入代码、日志或 README。
