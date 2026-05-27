@@ -1,0 +1,17 @@
+[Unit]
+Description=Jin10 WebSocket to QQ group realtime push bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/jin10_ws_schema_probe
+ExecStart=/home/ubuntu/jin10_ws_schema_probe/.venv/bin/python /home/ubuntu/jin10_ws_schema_probe/probe.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
